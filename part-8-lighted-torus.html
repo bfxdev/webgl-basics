@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>WebGL Basics part 8</title>
+
+    <script type='text/javascript'>
+
+// GLSL ES code to be compiled as vertex shader
+vertexShaderCode =
+'attribute vec3 ppos;                          // Input vertex (p. 2/4)                 \n'+
+'uniform mat4 mvp;                             // Vertex transformation matrix (p. 3)   \n'+
+'attribute vec4 pcolor;                        // Input color (p. 7)                    \n'+
+'varying mediump vec4 forward_color;           // Color forwarded to frag. shader (p. 7)\n'+
+'varying mediump float forward_lightf;         // Factor forwarded to frag. shader (p.8)\n'+
+'uniform mat3 normrot;                         // Transfo matrix for normals (p. 8)     \n'+
+'attribute vec3 pnormal;                       // Input normal (p. 8)                   \n'+
+'uniform vec3 lightvec;                        // White light vector (p. 8)             \n'+
+'void main(void) {\n'+
+'  vec3 rnormal = normrot*pnormal;             // Rotated normal (p. 8)                 \n'+
+'  float f = (1.0+dot(lightvec, rnormal))/2.0; // f propor. to angle light/normal (p. 8)\n'+
+'  forward_lightf = f;                         // Light factor used by frag shader (p.8)\n'+
+'  forward_color = pcolor;                     // Forwards color to frag shader (p. 7)  \n'+
+'  gl_Position = mvp * vec4(ppos, 1.0);        // Vertex transformation (p. 3/8)        \n'+
+'  gl_PointSize = 2.0;                         // Used for POINTS rendering (p. 6)      \n'+
+'}\n';
+
+// GLSL ES code to be compiled as fragment shader
+fragmentShaderCode =
+'varying mediump vec4 forward_color;           // Color from vertex shader (p. 7)       \n'+
+'varying mediump float forward_lightf;         // Light factor from vertex shader (p. 8)\n'+
+'void main(void) {\n'+
+'  mediump vec4 c = forward_color;             // Temp. variable for readibility (p. 8) \n'+
+'  mediump float f = forward_lightf;           // Temp. variable for readibility (p. 8) \n'+
+'  gl_FragColor = vec4(f*c.rgb, c.a);          // Final vertex color (p. 1/7/8)         \n'+
+'}\n';
+
+// Global variables
+//-----------------
+var gl = null;       // GL context
+var program;         // The program object used in the GL context
+var running = true;  // True when the canvas is periodically refreshed
+var aspectRatio;     // Aspect ratio of the canvas used to correct the X/Y distortion 
+var vertices;        // Vertices of the object (changed in part 6)
+var colors;          // Colors of the object (introduced in part 7)
+var normals;         // Normals of the object (introduced in part 8)
+
+// Function called by onload handler
+function start()
+{
+  // Gets canvas from the HTML page
+  var canvas = document.getElementById('glcanvas');
+
+  // Creates GL context
+  try {gl = canvas.getContext('experimental-webgl');}
+  catch(e) {alert('Exception catched in getContext: '+e.toString());return;}
+  
+  // If no exception but context creation failed, alerts user
+  if(!gl) {alert('Unable to create Web GL context');return;}
+  
+  //---------------- end of part 1 -----------------
+  
+  // Creates fragment shader (returns white color for any position)
+  var fshader = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fshader, fragmentShaderCode);
+  gl.compileShader(fshader);
+  if (!gl.getShaderParameter(fshader, gl.COMPILE_STATUS)) 
+  {alert('Error during fragment shader compilation:\n' + gl.getShaderInfoLog(fshader)); return;}
+
+  // Creates vertex shader (converts 2D point position to coordinates)
+  var vshader = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vshader, vertexShaderCode);
+  gl.compileShader(vshader);
+  if (!gl.getShaderParameter(vshader, gl.COMPILE_STATUS)) 
+  {alert('Error during vertex shader compilation:\n' + gl.getShaderInfoLog(vshader)); return;}
+
+  // Creates program and links shaders to it
+  program = gl.createProgram();
+  gl.attachShader(program, fshader);
+  gl.attachShader(program, vshader);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) 
+  {alert('Error during program linking:\n' + gl.getProgramInfoLog(program));return;}
+
+  // Validates and uses program in the GL context
+  gl.validateProgram(program);
+  if (!gl.getProgramParameter(program, gl.VALIDATE_STATUS)) 
+  {alert('Error during program validation:\n' + gl.getProgramInfoLog(program));return;}
+  gl.useProgram(program);
+
+  // --- part moved to a dedicated function in part 6
+
+  updateObject();
+  
+  //------------------ end of part 2 -------------------------------
+  
+  // Determination of the aspect ratio
+  aspectRatio = canvas.width / canvas.height;
+
+  // The function draw() will be called every 40 ms
+  setInterval("draw();", 40);
+}
+
+// Updates object with global parameters
+function updateObject()
+{ 
+  // ----------- added in part 6 --------------------
+ 
+  // Gets the torus factor from the HTML page
+  var interleave = parseFloat(document.getElementById('interleave').value);
+  var numsegs = parseFloat(document.getElementById('numsegs').value);
+  var numssegs = parseFloat(document.getElementById('numssegs').value);
+  var sradius = parseFloat(document.getElementById('sradius').value);
+
+  // Creates the object ---------- changed in part 7, 8
+  var obj = makeTorus(0.7, sradius, numsegs, numssegs, interleave);
+  vertices = obj.vertices;
+  colors = obj.colors;
+  normals = obj.normals;
+
+  // ---------- moved from function start() -----------
+
+  // Gets address of the input 'attribute' of the vertex shader
+  var vattrib = gl.getAttribLocation(program, 'ppos');
+  if(vattrib == -1)
+   {alert('Error during attribute address retrieval');return;}
+  gl.enableVertexAttribArray(vattrib);
+
+  // Initializes the vertex buffer and sets it as current one
+  var vbuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbuffer);
+
+  // Puts vertices to buffer and links it to attribute variable 'ppos'
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+  gl.vertexAttribPointer(vattrib, 3, gl.FLOAT, false, 0, 0);
+  
+  // ------------ added in part 7 ----------------------
+
+  // Connects colors array to vertex shader via the 'pcolor' attribute 
+  var cattrib = gl.getAttribLocation(program, 'pcolor');
+  if(cattrib == -1){alert('Error retrieving pcolor address');return;}
+  gl.enableVertexAttribArray(cattrib);
+  var cbuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, cbuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+  gl.vertexAttribPointer(cattrib, 4, gl.FLOAT, false, 0, 0);
+
+  // ------------ added in part 8 ----------------------
+
+  // Connects normals array to vertex shader via the 'pnormal' attribute 
+  var nattrib = gl.getAttribLocation(program, 'pnormal');
+  if(nattrib == -1){alert('Error retrieving pnormal address');return;}
+  gl.enableVertexAttribArray(nattrib);
+  var nbuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, nbuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+  gl.vertexAttribPointer(nattrib, 3, gl.FLOAT, false, 0, 0);
+}
+
+// Function called periodically to draw the scene
+function draw()
+{
+  // Tests if canvas should be refreshed
+  if(!running || !gl)
+    return;
+    
+  // Gets control value angles from HTML page via DOM
+  var ax = parseInt(document.getElementById('ax').innerText, 10);
+  var ay = parseInt(document.getElementById('ay').innerText, 10);
+  var az = parseInt(document.getElementById('az').innerText, 10);
+  
+  // Use increments via DOM to update angles (still in degrees)
+  ax = (ax + parseInt(document.getElementById('dx').value, 10) + 360) % 360;
+  ay = (ay + parseInt(document.getElementById('dy').value, 10) + 360) % 360;
+  az = (az + parseInt(document.getElementById('dz').value, 10) + 360) % 360;
+  
+  // Update HTML page with new values
+  document.getElementById('ax').innerText = ax.toString();
+  document.getElementById('ay').innerText = ay.toString();
+  document.getElementById('az').innerText = az.toString();
+  
+  // Convert values to radians
+  ax *= 2*Math.PI/360; ay *= 2*Math.PI/360; az *= 2*Math.PI/360; 
+
+  // Gets ox, oy, oz, s, d from the HTML form
+  var ox = parseFloat(document.getElementById('ox').value);
+  var oy = parseFloat(document.getElementById('oy').value);
+  var oz = parseFloat(document.getElementById('oz').value);
+  var s = parseFloat(document.getElementById('s').value);
+  var d = parseFloat(document.getElementById('d').value);
+  var f = parseFloat(document.getElementById('f').value);
+  var n = parseFloat(document.getElementById('n').value);
+  var exz = document.getElementById('exz').checked;
+  
+  // Gets reference on the "uniform" 4x4 matrix transforming coordinates
+  var amvp = gl.getUniformLocation(program, "mvp");
+  if(amvp == -1)
+  {alert('Uniform address retrieval of mvp failed');running=false;return;}  
+
+  // Creates matrix using rotation angles
+  var mat = getTransformationMatrix(ox, oy, oz, ax, ay, az, s, d, f, n, aspectRatio, exz);
+  
+  // Sets the model-view-projections matrix in the shader
+  gl.uniformMatrix4fv(amvp, false, mat);
+
+  //--------------------------- Changed in part 8 ------------
+
+  // Updates angles for light vector
+  var lrx = parseInt(document.getElementById('lrx').innerText, 10);
+  var lry = parseInt(document.getElementById('lry').innerText, 10);
+  lrx = (lrx + parseInt(document.getElementById('ldx').value, 10) + 360) % 360;
+  lry = (lry + parseInt(document.getElementById('ldy').value, 10) + 360) % 360;
+  document.getElementById('lrx').innerText = lrx.toString();
+  document.getElementById('lry').innerText = lry.toString();
+  lrx *= 2*Math.PI/360;
+  lry *= 2*Math.PI/360;
+
+  // Computes dynamic value of light vector
+  var lvec = new Float32Array([
+    -Math.cos(lrx)*Math.sin(lry), Math.sin(lrx), -Math.cos(lrx)*Math.cos(lry)
+    ]);
+
+  // Sets light direction via 'lightvec'
+  var alightvec = gl.getUniformLocation(program, "lightvec"); // Gets address
+  if(alightvec == -1)
+    {alert('Uniform address retrieval of lightvec failed');running=false;return;}  
+  gl.uniform3fv(alightvec, lvec);
+
+  // Sets up 3x3 rotation matrix for normals transformation in vertex shader
+  var anormrot = gl.getUniformLocation(program, "normrot"); // Gets address
+  if(anormrot == -1)
+    {alert('Uniform address retrieval of normrot failed');running=false;return;}  
+  var matnorm = getRotationMatrix(ax, ay, az);   // Computes new rotation matrix 3x3
+  gl.uniformMatrix3fv(anormrot, false, matnorm); // Sets matrix for shader
+
+  //------------------------------------------------------------
+
+  // Sets clear color to non-transparent dark blue and clears context
+  gl.clearColor(0.0, 0.0, 0.5, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  //---------------------------- Changed in part 7 ------------
+
+  // Enables Z-Buffering
+  gl.enable(gl.DEPTH_TEST);
+
+  //---------------------------- Changed in part 6 -------------
+
+  // Gets rendering parameter(s) from the HTML page
+  var rendering = document.getElementById('rendering').value;
+  var glrender = window.eval('gl.'+rendering);
+
+  // Draws the object
+  gl.drawArrays(glrender, 0, vertices.length/3);
+  gl.flush();
+}
+
+
+// Returns a transformation matrix as a flat array with 16 components, given:
+// ox, oy, oz: new origin (translation)
+// rx, ry, rz: rotation angles (radians)
+// s: scaling factor
+// d: distance between camera and origin after translation,
+//     if d <= -n skips projection completely
+// f: z coordinate of far plane (normally positive)
+// n: z coordinate of near plane (normally negative)
+// ar: aspect ratio of the viewport (e.g. 16/9)
+// exz: if true exchanges X and Z coords after projection
+function getTransformationMatrix(ox, oy, oz, rx, ry, rz, s, d, f, n, ar, exz)
+{
+  // Pre-computes trigonometric values
+  var cx = Math.cos(rx), sx = Math.sin(rx);
+  var cy = Math.cos(ry), sy = Math.sin(ry);
+  var cz = Math.cos(rz), sz = Math.sin(rz);
+
+  // Tests if d is too small, hence making perspective projection not possible
+  if (d <= -n)
+  {
+    // Transformation matrix without projection
+    return new Float32Array([
+      (cy*cz*s)/ar,cy*s*sz,-s*sy,0,
+      (s*(cz*sx*sy-cx*sz))/ar,s*(sx*sy*sz+cx*cz),cy*s*sx,0,
+      (s*(sx*sz+cx*cz*sy))/ar,s*(cx*sy*sz-cz*sx),cx*cy*s,0,
+      (s*(cz*((-oy*sx-cx*oz)*sy-cy*ox)-(oz*sx-cx*oy)*sz))/ar,
+      s*(((-oy*sx-cx*oz)*sy-cy*ox)*sz+cz*(oz*sx-cx*oy)),
+      s*(ox*sy+cy*(-oy*sx-cx*oz)),1    
+    ]);
+  }
+  else
+  {
+    // Pre-computes values determined with wxMaxima
+    var A=d;
+    var B=(n+f+2*d)/(f-n);
+    var C=-(d*(2*n+2*f)+2*f*n+2*d*d)/(f-n);
+    
+    // Tests if X and Z must be exchanged
+    if(!exz)
+    {
+      // Full transformation matrix
+      return new Float32Array([
+        (cy*cz*s*A)/ar,cy*s*sz*A,-s*sy*B,-s*sy,
+        (s*(cz*sx*sy-cx*sz)*A)/ar,s*(sx*sy*sz+cx*cz)*A,cy*s*sx*B,cy*s*sx,
+        (s*(sx*sz+cx*cz*sy)*A)/ar,s*(cx*sy*sz-cz*sx)*A,cx*cy*s*B,cx*cy*s,
+        (s*(cz*((-oy*sx-cx*oz)*sy-cy*ox)-(oz*sx-cx*oy)*sz)*A)/ar,
+        s*(((-oy*sx-cx*oz)*sy-cy*ox)*sz+cz*(oz*sx-cx*oy))*A,
+        C+(s*(ox*sy+cy*(-oy*sx-cx*oz))+d)*B,s*(ox*sy+cy*(-oy*sx-cx*oz))+d
+      ]);
+    }
+    else
+    {
+      // Full transformation matrix with XZ exchange
+      return new Float32Array([
+        -s*sy*B,cy*s*sz*A,(cy*cz*s*A)/ar,-s*sy,
+        cy*s*sx*B,s*(sx*sy*sz+cx*cz)*A,(s*(cz*sx*sy-cx*sz)*A)/ar,cy*s*sx,
+        cx*cy*s*B,s*(cx*sy*sz-cz*sx)*A,(s*(sx*sz+cx*cz*sy)*A)/ar,cx*cy*s,
+        C+(s*(ox*sy+cy*(-oy*sx-cx*oz))+d)*B,s*(((-oy*sx-cx*oz)*sy-cy*ox)*sz+cz*(oz*sx-cx*oy))*A,
+        (s*(cz*((-oy*sx-cx*oz)*sy-cy*ox)-(oz*sx-cx*oy)*sz)*A)/ar,s*(ox*sy+cy*(-oy*sx-cx*oz))+d
+      ]);
+    }
+  }
+}
+
+
+// Returns a rotation matrix as a flat array with 9 components, according to the
+//  rotation angles rx, ry, rz given in radians
+function getRotationMatrix(rx, ry, rz)
+{
+  // Pre-computes trigonometric values
+  var cx = Math.cos(rx), sx = Math.sin(rx);
+  var cy = Math.cos(ry), sy = Math.sin(ry);
+  var cz = Math.cos(rz), sz = Math.sin(rz);
+
+  // Returns matrix
+  return new Float32Array([ cy*cz,            cy*sz,            -sy,
+                            (sx*sy*cz-cx*sz), (sx*sy*sz+cx*cz), sx*cy,
+                            (sx*sz+cx*sy*cz), (cx*sy*sz-sx*cz), cx*cy]);
+}
+
+
+// Creates a 3D torus in the XY plane, returns the data in a new object composed of
+//   several Float32Array objects named 'vertices', 'colors' and "normals',
+//   according to the following parameters:
+// r:  big radius
+// sr: section radius
+// n:  number of faces
+// sn: number of faces on section
+// k:  factor between 0 and 1 defining the space between strips of the torus
+function makeTorus(r, sr, n, sn, k)
+{
+  // Temporary arrays for the vertices, normals and colors
+  var tv = new Array();
+  var tc = new Array();
+  var tn = new Array();
+  
+  // Iterates along the big circle and then around a section
+  for(var i=0;i!=n;i++)                 // Iterates over all strip rounds
+    for(var j=0;j!=(sn+1*(i==n-1));j++) // Iterates along the torus section
+      for(var v=0;v!=2;v++)             // Creates zigzag pattern (v equals 0 or 1)
+      {
+        // Pre-calculation of angles
+        var a =  2*Math.PI*(i+j/sn+k*v)/n; // Angle offset of the section
+        var sa = 2*Math.PI*j/sn;           // Angle offset around the torus section
+        var x, y, z;
+      
+        // Coordinates on the surface of the torus  
+        tv.push(x = (r+sr*Math.cos(sa))*Math.cos(a)); // X
+        tv.push(y = (r+sr*Math.cos(sa))*Math.sin(a)); // Y
+        tv.push(z = sr*Math.sin(sa));                 // Z
+      
+        // Colors
+        tc.push(0.5+0.5*x); // R
+        tc.push(0.5+0.5*y); // G
+        tc.push(0.5+0.5*z); // B
+        tc.push(1.0);       // Alpha
+        
+        // Normals computed by rotating the section normal
+        tn.push(Math.cos(sa)*Math.cos(a));  // X
+        tn.push(Math.cos(sa)*Math.sin(a));  // Y
+        tn.push(Math.sin(sa));              // Z
+      }
+
+  // Converts and returns array
+  var res = new Object();
+  res.vertices = new Float32Array(tv);
+  res.colors = new Float32Array(tc);
+  res.normals = new Float32Array(tn);
+  return res;
+}
+
+    </script>
+  </head>
+
+  <body onload='start();'>
+
+    <h1>WebGL lighted toroidal strip</h1>
+
+    <canvas id='glcanvas' width=320 height=240 onclick='running = !running;'>
+       Your browser may not support HTML5
+    </canvas>
+
+    <p>Click on the animation to start and stop it.</p>
+    
+    <!-- Inserted in part 6 -->
+    <p>
+      <div style='display:inline-block;'>Mode in drawArrays:</div>
+      <div style='display:inline-block;'>
+        <select id='rendering'>
+          <option selected="selected">TRIANGLE_STRIP<option>LINE_STRIP
+          <option>POINTS<option>LINES<option>TRIANGLES<option>LINE_LOOP
+          <option>TRIANGLE_FAN
+        </select>
+      </div>      
+    </p>
+    
+    <p>
+      <div style='display:inline-block;'>Light vector</div>
+      <div style='display:inline-block;padding-left:0.3em;'>RX:</div>
+      <div style='display:inline-block; width:1.5em;'id='lrx'>0</div>
+      <div style='display:inline-block;'>
+        <select id='ldx'>
+          <option>-2<option>-1<option>0<option>+1<option selected="selected">+2
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:0.3em;'>RY:</div>
+      <div style='display:inline-block; width:1.5em;'id='lry'>0</div>
+      <div style='display:inline-block;'>
+        <select id='ldy'>
+          <option>-2<option>-1<option>0<option selected="selected">+1<option>+2
+        </select>
+      </div>
+    </p>
+
+    <p>
+      <div style='display:inline-block;'>Torus interleave:</div>
+      <div style='display:inline-block;'>
+        <select id='interleave' onchange='updateObject();'>
+          <option>1.0<option>0.7<option selected="selected">0.4<option>0.2
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:0.2em;'>Section radius:</div>
+      <div style='display:inline-block;'>
+        <select id='sradius' onchange='updateObject();'>
+          <option>0.2<option selected="selected">0.3<option>0.7<option>0.9
+        </select>
+      </div>
+    <br/>
+      <div style='display:inline-block;padding-left:0.2em;'>#segments:</div>
+      <div style='display:inline-block;'>
+        <select id='numsegs' onchange='updateObject();'>
+          <option>2<option>3<option>7<option selected="selected">15<option>40
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:0.2em;'>#segments in section:</div>
+      <div style='display:inline-block;'>
+        <select id='numssegs' onchange='updateObject();'>
+          <option>2<option>3<option>7<option selected="selected">15<option>40
+        </select>
+      </div>
+    </p>
+
+    <p>
+      <div style='display:inline-block;'>OX:</div>
+      <div style='display:inline-block;'>
+        <select id='ox'>
+          <option>-1.0<option>-0.7<option>-0.3<option selected="selected">0
+          <option>+0.3<option>+0.7<option>+1.0
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:1em;'>OY:</div>
+      <div style='display:inline-block;'>
+        <select id='oy'>
+          <option>-1.0<option>-0.7<option>-0.3<option selected="selected">0
+          <option>+0.3<option>+0.7<option>+1.0
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:1em;'>OZ:</div>
+      <div style='display:inline-block;'>
+        <select id='oz'>
+          <option>-1.0<option>-0.7<option>-0.3<option selected="selected">0
+          <option>+0.3<option>+0.7<option>+1.0
+        </select>
+      </div>
+    <br/>
+      <div style='display:inline-block;'>RX:</div>
+      <div style='display:inline-block; width:1.5em;'id='ax'>0</div>
+      <div style='display:inline-block;'>
+        <select id='dx'>
+          <option>-2<option>-1<option>0<option selected="selected">+1<option>+2
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:0.3em;'>RY:</div>
+      <div style='display:inline-block; width:1.5em;'id='ay'>0</div>
+      <div style='display:inline-block;'>
+        <select id='dy'>
+          <option>-2<option>-1<option>0<option>+1<option selected="selected">+2
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:0.3em;'>RZ:</div>
+      <div style='display:inline-block; width:1.5em;'id='az'>0</div>
+      <div style='display:inline-block;'>
+        <select id='dz'>
+          <option>-2<option>-1<option selected="selected">0<option>+1<option>+2
+        </select>
+      </div>
+    <br/>
+      <div style='display:inline-block;'>Scaling:</div>
+      <div style='display:inline-block;'>
+        <select id='s'>
+          <option>1.5<option>1.0<option selected="selected">0.7<option>0.5<option>0.3
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:1em;'>Distance to camera:</div>
+      <div style='display:inline-block;'>
+        <select id='d'>
+          <option>0.5<option selected="selected">1.1<option>2.0
+          <option>5.0<option>100.0<option>-1.5
+        </select>
+      </div>
+    <br/>
+      <div style='display:inline-block;'>Near:</div>
+      <div style='display:inline-block;'>
+        <select id='n'>
+          <option>0.5<option>0.0<option>-0.5<option selected="selected">-1.0<option>-2.0
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:0.2em;'>Far:</div>
+      <div style='display:inline-block;'>
+        <select id='f'>
+          <option>0.5<option selected="selected">1.0<option>2.5
+        </select>
+      </div>
+      <div style='display:inline-block;padding-left:0.2em;'>
+        <input type='checkbox' id='exz'>Exchange XZ</input>
+      </div>
+    </p>
+
+  </body>
+</html>
+
+
