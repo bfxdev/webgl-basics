@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>WebGL Basics part 1</title>
+
+    <script type='text/javascript'>
+var gl; // GL context
+// Function called by onload handler
+function start()
+{
+  // Gets canvas from the HTML page
+  var canvas = document.getElementById('glcanvas');
+  // Creates GL context
+  gl = null;
+  try {gl = canvas.getContext('experimental-webgl');}
+  catch(e) {alert('Exception catched in getContext: '+e.toString());return;}
+  
+  // If no exception but context creation failed, alerts user
+  if(!gl) {alert('Unable to create Web GL context');return;}
+  
+  // Sets clear color to non-transparent dark blue and clears context
+  gl.clearColor(0.0, 0.0, 0.5, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+}
+    </script>
+  </head>
+
+  <body onload='start();'>
+
+    <h1>WebGL context in canvas</h1>
+
+    <canvas id='glcanvas' width=320 height=240>
+       It seems the browser does not support the 'canvas' tag (part of HTML5)
+    </canvas>
+
+    <p>After the canvas</p>
+
+  </body>
+</html>
